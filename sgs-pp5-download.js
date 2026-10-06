@@ -1,6 +1,8 @@
 /*!
- * KJST · ดาวน์โหลด ปพ.5 จาก SGS (sgs-pp5-download.js) v1.1 — 3 ต.ค. 2569
+ * KJST · ดาวน์โหลด ปพ.5 จาก SGS (sgs-pp5-download.js) v1.2 — 6 ต.ค. 2569
  * เฟส 13 KJST e-Score · เครื่องมือ admin (bookmarklet)
+ * v1.2 (ภาค 17): เลือกชนิดไฟล์ "7. ผลการเรียน ปพ.5" (ตรวจวิธีที่ 1) หรือ "48. คะแนนรายวิชา" (ตรวจวิธีที่ 2)
+ *   หาเมนูจาก value ขึ้นต้น "48," หรือข้อความขึ้นต้น "48." · ตรวจหัวตารางตามชนิดไฟล์ · จำตัวเลือกใน kjst_pp5_opts.kind
  *
  * ทำงานบนหน้าใดก็ได้ของ SGS ที่ล็อกอินแล้ว (แนะนำหน้า สารสนเทศ /sgs/TblClassRoom/Universal.aspx)
  * ไม่คลิกบนหน้าจริง — จำลองการส่งฟอร์ม ASP.NET ด้วย fetch ทีละขั้น (หน้าไม่โหลดใหม่ กล่องไม่หาย):
@@ -13,12 +15,18 @@
  */
 (function () {
   'use strict';
-  var VER = '1.1';
+  var VER = '1.2';
   if (window.__kjstPp5 && window.__kjstPp5.show) { window.__kjstPp5.show(); return; }
 
   // ---------- ค่าตั้งต้น ----------
   var ROOMS = { 1: 7, 2: 7, 3: 7, 4: 6, 5: 6, 6: 6 };   // ม.1–3 ชั้นละ 7 · ม.4–6 ชั้นละ 6 = 39 ห้อง
-  var MODE_PREFIX = '7,';                              // option "7. ผลการเรียน ปพ.5" value="7,Usp_Stat"
+  // ชนิดไฟล์ (เมนูข้อมูล DropDownListMode) · prefix = ต้น value ("7,Usp_Stat") · text = ต้นข้อความ option (สำรอง)
+  // need = หัวคอลัมน์ที่ต้องมี · deny = หัวคอลัมน์ที่ต้องไม่มี (กันไฟล์ผิดชนิด)
+  var KINDS = {
+    '7':  { prefix: '7,',  text: /^7\./,  label: '7. ผลการเรียน ปพ.5', fb: '7.ผลการเรียนปพ.5', need: ['กลุ่มที่'], deny: [] },
+    '48': { prefix: '48,', text: /^48\./, label: '48. คะแนนรายวิชา',   fb: '48. คะแนนรายวิชา', need: ['รวมกลางภาค', 'S1'], deny: ['กลุ่มที่'] }
+  };
+  function K() { return KINDS[S.opts.kind] || KINDS['7']; }
   var ID_YEAR = 'ctl00__PageHeader__DropDownListYr';
   var ID_TERM = 'ctl00__PageHeader__DropDownListTr';
   var ID_MODE = 'ctl00_PageContent_DropDownListMode';
@@ -43,8 +51,8 @@
   function norm(s) { return String(s == null ? '' : s).replace(/[\s\u00a0]+/g, '').trim(); }
   function kb(n) { return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.round(n / 1024) + ' KB'; }
   function loadOpts() {
-    var o = { grades: [1, 2, 3, 4, 5, 6], speed: 'normal' };
-    try { var j = JSON.parse(localStorage.getItem(LS_OPTS) || 'null'); if (j) { if (Array.isArray(j.grades)) o.grades = j.grades; if (SPEED[j.speed]) o.speed = j.speed; } } catch (e) {}
+    var o = { grades: [1, 2, 3, 4, 5, 6], speed: 'normal', kind: '7' };
+    try { var j = JSON.parse(localStorage.getItem(LS_OPTS) || 'null'); if (j) { if (Array.isArray(j.grades)) o.grades = j.grades; if (SPEED[j.speed]) o.speed = j.speed; if (j.kind === '7' || j.kind === '48') o.kind = j.kind; } } catch (e) {}
     return o;
   }
   function saveOpts() { try { localStorage.setItem(LS_OPTS, JSON.stringify(S.opts)); } catch (e) {} }
@@ -163,10 +171,12 @@
     if (!S.doc) { await getPage(); readHeader(); }
     var m = S.doc.getElementById(ID_MODE), mv = '';
     var mo = m.querySelectorAll('option');
-    for (var i = 0; i < mo.length; i++) if (optVal(mo[i]).indexOf(MODE_PREFIX) === 0) { mv = optVal(mo[i]); break; }
-    if (!mv) throw new Error('ไม่พบรายการ "7. ผลการเรียน ปพ.5" ในเมนูข้อมูล');
+    var k = K();
+    for (var i = 0; i < mo.length; i++) if (optVal(mo[i]).indexOf(k.prefix) === 0) { mv = optVal(mo[i]); break; }
+    if (!mv) for (var i2 = 0; i2 < mo.length; i2++) if (k.text.test(norm(mo[i2].textContent))) { mv = optVal(mo[i2]); break; }
+    if (!mv) throw new Error('ไม่พบรายการ "' + k.label + '" ในเมนูข้อมูล');
     if (selVal(m) !== mv || !findLevelSelect(S.doc)) { await postback(m.getAttribute('name'), mapOf(m.getAttribute('name'), mv)); await stepWait(); }
-    if (!findLevelSelect(S.doc)) throw new Error('DIAG: ไม่พบ dropdown "ระดับชั้น" หลังเลือก "7. ผลการเรียน ปพ.5"\n' + diagSelects(S.doc));
+    if (!findLevelSelect(S.doc)) throw new Error('DIAG: ไม่พบ dropdown "ระดับชั้น" หลังเลือก "' + k.label + '"\n' + diagSelects(S.doc));
   }
 
   async function ensureContext(g) {
@@ -255,7 +265,7 @@
     return raw;
   }
   function fileNameFor(cd, g, r) {
-    var fb = '7.ผลการเรียนปพ.5--' + S.yr + '_' + S.tr + '-' + g + '-' + r + '.xls';
+    var fb = K().fb + '--' + S.yr + '_' + S.tr + '-' + g + '-' + r + '.xls';
     var n = dispName(cd).replace(/[\\\/:*?"<>|]/g, '_').trim();
     var ok = new RegExp('-' + g + '-' + r + '\\.xls$', 'i').test(n);
     return { name: ok ? n : fb, fromSgs: ok, raw: n };
@@ -263,7 +273,7 @@
 
   // ตรวจไฟล์: ต้องมีตาราง MyGrid · ทุกแถว ชั้น/ห้อง = ม.g/r · ปี/ภาค = หัวหน้า SGS
   function checkFile(text, g, r) {
-    if (text.indexOf('MyGrid') < 0) return { bad: 'ไฟล์ไม่มีตาราง MyGrid (ไม่ใช่ไฟล์ 7.ผลการเรียน ปพ.5)' };
+    if (text.indexOf('MyGrid') < 0) return { bad: 'ไฟล์ไม่มีตาราง MyGrid (ไม่ใช่ไฟล์ ' + K().label + ')' };
     var d = new DOMParser().parseFromString(text, 'text/html');
     var tb = d.getElementById('ctl00_PageContent_MyGrid') || d.querySelector('table');
     var trs = tb ? tb.querySelectorAll('tr') : [];
@@ -272,10 +282,14 @@
     function col(re) { for (var i = 0; i < head.length; i++) if (re.test(head[i])) return i; return -1; }
     var cRoom = col(/^ชั้น\/ห้อง$/), cYr = col(/^ปีการศึกษา$/), cTr = col(/^ภาคเรียนที่$/), cSub = col(/^รหัสวิชา$/), cSid = col(/^เลขประ/);
     if (cRoom < 0 || cSub < 0 || cSid < 0) return { bad: 'หัวตารางไม่ตรงรูปแบบ ปพ.5 (ไม่พบ ชั้น/ห้อง/รหัสวิชา/เลขประจำตัว)' };
+    var kd = K();
+    var lack = kd.need.filter(function (h) { return head.indexOf(h) < 0; }), extra = kd.deny.filter(function (h) { return head.indexOf(h) >= 0; });
+    if (lack.length || extra.length) return { bad: 'ไม่ใช่ไฟล์ ' + kd.label + ' (หัวตาราง' + (lack.length ? ' ไม่มี ' + lack.join(', ') : '') + (extra.length ? ' มี ' + extra.join(', ') : '') + ')' };
     var want = 'ม.' + g + '/' + r, rooms = {}, yrs = {}, subs = {}, sids = {}, n = 0;
     for (var i = 1; i < trs.length; i++) {
       var c = trs[i].querySelectorAll('td'); if (!c.length) continue;
       var v = function (k) { return k >= 0 && c[k] ? norm(c[k].textContent) : ''; };
+      if (!v(cSub) && !v(cSid)) continue;                    // แถวว่างท้ายตาราง (ไฟล์ 48 มี &nbsp; ทุกช่อง)
       n++; rooms[v(cRoom)] = (rooms[v(cRoom)] || 0) + 1; yrs[v(cYr) + '/' + v(cTr)] = 1; subs[v(cSub)] = 1; sids[v(cSid)] = 1;
     }
     var rk = Object.keys(rooms), yk = Object.keys(yrs);
@@ -394,7 +408,7 @@
       if (!list.length) { log(onlyFailed ? 'ไม่มีห้องที่ล้มเหลว' : 'ยังไม่ได้เลือกชั้น', 'warn'); return; }
       if (!onlyFailed) list.forEach(function (R) { R.st = 'wait'; R.msg = ''; });
       renderRooms();
-      log('▶ เริ่ม ' + list.length + ' ห้อง' + (onlyFailed ? ' (เฉพาะที่ล้มเหลว)' : '') + ' · ความเร็ว ' + (S.opts.speed === 'slow' ? 'ช้า' : 'ปกติ'));
+      log('▶ เริ่ม ' + list.length + ' ห้อง · ไฟล์ ' + K().label + (onlyFailed ? ' (เฉพาะที่ล้มเหลว)' : '') + ' · ความเร็ว ' + (S.opts.speed === 'slow' ? 'ช้า' : 'ปกติ'));
       var t0 = Date.now(), lastG = 0;
       for (var i = 0; i < list.length; i++) {
         if (S.stop) break;
@@ -477,6 +491,7 @@
       '<div class="bd">' +
       '<div class="row"><span class="lb">SGS</span><span id="kpp5Ctx">กำลังอ่านหน้าสารสนเทศ…</span></div>' +
       '<div class="row"><span class="lb">บันทึกที่</span><span class="dir" id="kpp5Dir"></span><button class="b g" id="kpp5Pick">เลือกโฟลเดอร์</button></div>' +
+      '<div class="row"><span class="lb">ไฟล์</span><select id="kpp5Kind"><option value="7">7. ผลการเรียน ปพ.5 (ตรวจวิธีที่ 1)</option><option value="48">48. คะแนนรายวิชา (ตรวจวิธีที่ 2)</option></select></div>' +
       '<div class="row"><span class="lb">ชั้น</span>' + chips + '</div>' +
       '<div class="row"><span class="lb">ความเร็ว</span><select id="kpp5Spd"><option value="normal">ปกติ</option><option value="slow">ช้า (server มีคนใช้เยอะ)</option></select></div>' +
       '<div class="grid" id="kpp5Grid"></div>' +
@@ -495,6 +510,12 @@
         if (i >= 0) S.opts.grades.splice(i, 1); else S.opts.grades.push(g);
         saveOpts(); renderChips(); renderRooms();
       });
+    });
+    $('kpp5Kind').value = S.opts.kind;
+    $('kpp5Kind').addEventListener('change', function () {
+      S.opts.kind = this.value; saveOpts();
+      Object.keys(S.rooms).forEach(function (k) { var R = S.rooms[k]; R.st = 'wait'; R.msg = ''; R.file = ''; R.students = 0; });
+      renderRooms(); log('เปลี่ยนชนิดไฟล์เป็น "' + K().label + '"');
     });
     $('kpp5Spd').value = S.opts.speed;
     $('kpp5Spd').addEventListener('change', function () { S.opts.speed = this.value; saveOpts(); });
@@ -554,7 +575,7 @@
   }
   function renderButtons() {
     var r = S.running;
-    ['kpp5Go', 'kpp5Retry', 'kpp5Pick', 'kpp5Spd'].forEach(function (id) { var e = $(id); if (e) e.disabled = r; });
+    ['kpp5Go', 'kpp5Retry', 'kpp5Pick', 'kpp5Spd', 'kpp5Kind'].forEach(function (id) { var e = $(id); if (e) e.disabled = r; });
     var s = $('kpp5Stop'); if (s) s.disabled = !r;
   }
 
